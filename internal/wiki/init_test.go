@@ -14,12 +14,11 @@ func TestInitGreenfield(t *testing.T) {
 		t.Fatalf("InitGreenfield: %v", err)
 	}
 
-	// Verify directory structure
+	// Verify directory structure (no connections/ — see #91)
 	expectedDirs := []string{
 		"raw",
 		"wiki/summaries",
 		"wiki/concepts",
-		"wiki/connections",
 		"wiki/outputs",
 		"wiki/images",
 		"wiki/archive",
@@ -79,11 +78,10 @@ func TestInitVaultOverlay(t *testing.T) {
 		t.Fatalf("InitVaultOverlay: %v", err)
 	}
 
-	// Verify _wiki structure
+	// Verify _wiki structure (no connections/ — see #91)
 	expectedDirs := []string{
 		"_wiki/summaries",
 		"_wiki/concepts",
-		"_wiki/connections",
 		"_wiki/outputs",
 		"_wiki/images",
 		"_wiki/archive",
@@ -202,5 +200,40 @@ func TestInitGreenfield_WritesConfigWhenAbsent(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "project: new-project") {
 		t.Errorf("config.yaml missing expected project name; got:\n%s", string(got))
+	}
+}
+
+// TestInitGreenfield_DoesNotCreateConnectionsDir verifies that
+// `sage-wiki init` no longer scaffolds an empty wiki/connections/ directory.
+// Connection edges live in the SQLite relations table and surface via the
+// ontology query/graph paths — an empty dir confused users (#91).
+func TestInitGreenfield_DoesNotCreateConnectionsDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := InitGreenfield(dir, "test", "gemini-2.5-flash"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wiki", "connections")); !os.IsNotExist(err) {
+		t.Errorf("wiki/connections/ should NOT be created; stat err = %v", err)
+	}
+	// Sibling dirs should still exist
+	for _, sub := range []string{"summaries", "concepts", "outputs", "images", "archive"} {
+		if _, err := os.Stat(filepath.Join(dir, "wiki", sub)); err != nil {
+			t.Errorf("wiki/%s/ should exist: %v", sub, err)
+		}
+	}
+}
+
+func TestInitVaultOverlay_DoesNotCreateConnectionsDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := InitVaultOverlay(dir, "test-vault", []string{"Notes"}, nil, "_wiki", "gemini-2.5-flash"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "_wiki", "connections")); !os.IsNotExist(err) {
+		t.Errorf("_wiki/connections/ should NOT be created; stat err = %v", err)
+	}
+	for _, sub := range []string{"summaries", "concepts", "outputs", "images", "archive"} {
+		if _, err := os.Stat(filepath.Join(dir, "_wiki", sub)); err != nil {
+			t.Errorf("_wiki/%s/ should exist: %v", sub, err)
+		}
 	}
 }

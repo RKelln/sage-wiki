@@ -110,6 +110,9 @@ type CompilerConfig struct {
 	DedupThreshold float64 `yaml:"dedup_threshold,omitempty"` // cosine similarity for auto-merge (default: 0.85)
 	DedupStrategy  string  `yaml:"dedup_strategy,omitempty"`  // "embedding" (default) or "llm"
 
+	// Wikilink validation
+	StripBrokenLinks *bool `yaml:"strip_broken_links,omitempty"` // strip [[wikilinks]] to non-existent concept articles after compile (default: true). Set false to preserve broken links (useful when expecting future compiles to fill them in). Issue #90.
+
 	resolvedTZ *time.Location `yaml:"-"` // cached by Validate(); not serialized
 }
 
@@ -150,6 +153,15 @@ func (c CompilerConfig) BackpressureIsEnabled() bool {
 		return true
 	}
 	return *c.BackpressureEnabled
+}
+
+// StripBrokenLinksEnabled returns whether dead [[wikilinks]] are stripped
+// from articles after compile (default: true). Issue #90.
+func (c CompilerConfig) StripBrokenLinksEnabled() bool {
+	if c.StripBrokenLinks == nil {
+		return true
+	}
+	return *c.StripBrokenLinks
 }
 
 type SearchConfig struct {

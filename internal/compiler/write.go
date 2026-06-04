@@ -539,23 +539,73 @@ func mapConfidence(value string) string {
 	}
 }
 
-// validateWikilinks removes [[links]] that point to non-existent concept articles.
-func validateWikilinks(projectDir, outputDir, content string) string {
+// StripBrokenWikilinkStats summarizes one StripBrokenWikilinks sweep.
+type StripBrokenWikilinkStats struct {
+	ArticlesScanned int
+	ArticlesEdited  int
+	LinksStripped   int
+}
+
+// StripBrokenWikilinks scans every article under <outputDir>/concepts and
+// rewrites those that contain [[wikilinks]] to non-existent concept files,
+// replacing the dead link with bare text. Intended to run once after Pass 3
+// completes, when the on-disk set of concept articles is authoritative.
+// Issue #90.
+func StripBrokenWikilinks(projectDir, outputDir string) (StripBrokenWikilinkStats, error) {
+	var stats StripBrokenWikilinkStats
 	conceptsDir := filepath.Join(projectDir, outputDir, "concepts")
 
-	re := regexp.MustCompile(`\[\[([^\]]+)\]\]`)
-	return re.ReplaceAllStringFunc(content, func(match string) string {
-		target := match[2 : len(match)-2] // strip [[ and ]]
-
-		// Check if article exists
-		articlePath := filepath.Join(conceptsDir, target+".md")
-		if _, err := os.Stat(articlePath); err == nil {
-			return match // valid link, keep it
+	// Build the set of existing concept article slugs (filename without .md).
+	entries, err := os.ReadDir(conceptsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return stats, nil
 		}
+		return stats, fmt.Errorf("strip-broken-links: read concepts dir: %w", err)
+	}
+	existing := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		existing[strings.TrimSuffix(name, ".md")] = true
+	}
 
-		// Link is broken — return just the text without brackets
-		return target
-	})
+	re := regexp.MustCompile(`\[\[([^\]]+)\]\]`)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		articlePath := filepath.Join(conceptsDir, e.Name())
+		data, err := os.ReadFile(articlePath)
+		if err != nil {
+			continue
+		}
+		stats.ArticlesScanned++
+
+		stripped := 0
+		rewritten := re.ReplaceAllStringFunc(string(data), func(match string) string {
+			target := match[2 : len(match)-2]
+			if existing[target] {
+				return match
+			}
+			stripped++
+			return target
+		})
+		if stripped == 0 {
+			continue
+		}
+		if err := os.WriteFile(articlePath, []byte(rewritten), 0644); err != nil {
+			return stats, fmt.Errorf("strip-broken-links: write %s: %w", e.Name(), err)
+		}
+		stats.ArticlesEdited++
+		stats.LinksStripped += stripped
+	}
+	return stats, nil
 }
 
 // buildSourceContext reads source files for a concept, splits large ones

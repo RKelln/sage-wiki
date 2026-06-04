@@ -13,12 +13,15 @@ import (
 
 // InitGreenfield creates a new sage-wiki project from scratch.
 func InitGreenfield(dir string, project string, model string) error {
-	// Create directories
+	// Create directories. Note: "connections" is intentionally NOT created —
+	// concept-to-concept relations live in the SQLite relations table and
+	// surface via `sage-wiki ontology query`, the web UI graph, and the
+	// linter's ConnectionsPass. An empty connections/ dir confused users into
+	// thinking the feature was broken (#91).
 	dirs := []string{
 		filepath.Join(dir, "raw"),
 		filepath.Join(dir, "wiki", "summaries"),
 		filepath.Join(dir, "wiki", "concepts"),
-		filepath.Join(dir, "wiki", "connections"),
 		filepath.Join(dir, "wiki", "outputs"),
 		filepath.Join(dir, "wiki", "images"),
 		filepath.Join(dir, "wiki", "archive"),
@@ -79,9 +82,10 @@ func InitVaultOverlay(dir string, project string, sourceFolders []string, ignore
 		output = "_wiki"
 	}
 
-	// Create output directories
+	// Create output directories. See InitGreenfield re: "connections" — same
+	// rationale (#91).
 	outputDir := filepath.Join(dir, output)
-	subdirs := []string{"summaries", "concepts", "connections", "outputs", "images", "archive"}
+	subdirs := []string{"summaries", "concepts", "outputs", "images", "archive"}
 	for _, sub := range subdirs {
 		if err := os.MkdirAll(filepath.Join(outputDir, sub), 0755); err != nil {
 			return fmt.Errorf("init: create %s: %w", sub, err)
