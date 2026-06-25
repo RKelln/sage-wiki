@@ -193,23 +193,14 @@ func scanSnapshot(sourcePaths []string, ignore []string) map[string]string {
 	snapshot := make(map[string]string)
 
 	for _, dir := range sourcePaths {
-		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-
-			// Use relative path for consistent ignore matching with Diff
-			relPath, relErr := filepath.Rel(dir, path)
-			if relErr != nil {
-				relPath = path
-			}
+		WalkSourceDir(dir, func(absPath, relPath string, _ os.DirEntry) error {
 			if isIgnored(relPath, ignore) {
 				return nil
 			}
 
-			hash := quickHash(path)
+			hash := quickHash(absPath)
 			if hash != "" {
-				snapshot[path] = hash
+				snapshot[absPath] = hash
 			}
 			return nil
 		})
@@ -268,7 +259,11 @@ func triggerCompile(projectDir string, trigger string, opts CompileOpts, cc *Com
 
 // addRecursive adds a directory and all subdirectories to the watcher.
 func addRecursive(watcher *fsnotify.Watcher, dir string) error {
-	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+	walkPath := dir
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		walkPath = resolved
+	}
+	return filepath.WalkDir(walkPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
