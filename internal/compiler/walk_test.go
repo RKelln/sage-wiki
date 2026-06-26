@@ -3,6 +3,7 @@ package compiler
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xoai/sage-wiki/internal/config"
@@ -97,15 +98,14 @@ func TestDiff_DiscoversFilesInSymlinkedSource(t *testing.T) {
 
 	// Manifest paths must use the source name, not the real path
 	for _, s := range diff.Added {
-		if !filepath.HasPrefix(s.Path, "raw/") {
+		if !strings.HasPrefix(s.Path, "raw/") {
 			t.Errorf("manifest path %q should start with raw/", s.Path)
 		}
 	}
 
 	// Diff should be idempotent — mark as compiled then re-diff
-	mf.AddSource("raw/a.md", diff.Added[0].Hash, "article", 3)
-	mf.AddSource("raw/b.md", diff.Added[1].Hash, "article", 3)
 	for _, s := range diff.Added {
+		mf.AddSource(s.Path, s.Hash, s.Type, s.Size)
 		mf.MarkCompiled(s.Path, "wiki/summaries/"+filepath.Base(s.Path), nil)
 	}
 	mf.Save(filepath.Join(projectDir, ".manifest.json"))
