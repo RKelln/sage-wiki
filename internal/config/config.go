@@ -262,9 +262,10 @@ type SearchConfig struct {
 	HybridWeightBM25   float64 `yaml:"hybrid_weight_bm25"`
 	HybridWeightVector float64 `yaml:"hybrid_weight_vector"`
 	DefaultLimit       int     `yaml:"default_limit"`
-	QueryExpansion     *bool   `yaml:"query_expansion,omitempty"` // enable LLM query expansion (default: true)
-	Rerank             *bool   `yaml:"rerank,omitempty"`          // enable LLM re-ranking (default: true)
-	ChunkSize          int     `yaml:"chunk_size,omitempty"`      // tokens per chunk for indexing (default: 800)
+	QueryExpansion     *bool   `yaml:"query_expansion,omitempty"`  // enable LLM query expansion (default: true)
+	Rerank             *bool   `yaml:"rerank,omitempty"`           // enable LLM re-ranking (default: true)
+	ChunkSize          int     `yaml:"chunk_size,omitempty"`       // tokens per chunk for indexing (default: 800)
+	ResultMaxChars     int     `yaml:"result_max_chars,omitempty"` // max chars (runes) of content per wiki_search result before truncation (default: 2000; set very high to effectively disable)
 
 	// Graph-enhanced retrieval
 	GraphExpansion       *bool    `yaml:"graph_expansion,omitempty"`        // enable graph-based context expansion (default: true)
@@ -331,6 +332,17 @@ func (s SearchConfig) ContextMaxTokensOrDefault() int {
 		return 8000
 	}
 	return s.ContextMaxTokens
+}
+
+// ResultMaxCharsOrDefault returns the per-result content cap (in runes) for
+// wiki_search, or 2000 if not set. Bounds the MCP search payload so a single
+// search can't overflow the calling agent's context; full text stays available
+// via wiki_read.
+func (s SearchConfig) ResultMaxCharsOrDefault() int {
+	if s.ResultMaxChars <= 0 {
+		return 2000
+	}
+	return s.ResultMaxChars
 }
 
 // WeightDirectLinkOrDefault returns the direct link weight or 3.0 if not set.

@@ -255,6 +255,13 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 		return errorResult(err.Error()), nil
 	}
 
+	// Cap each result's content so a single search can't overflow the caller's
+	// context (full text remains available via wiki_read).
+	maxRunes := s.cfg.Search.ResultMaxCharsOrDefault()
+	for i := range results {
+		results[i].Content = truncateResultContent(results[i].Content, results[i].ArticlePath, maxRunes)
+	}
+
 	// Count uncompiled sources matching the query (search response signaling)
 	uncompiledCount := s.countUncompiledMatches(query)
 
@@ -309,6 +316,35 @@ func (s *Server) countUncompiledMatches(query string) int {
 		return 0 // table may not exist yet
 	}
 	return count
+}
+
+// truncateResultContent caps content to maxRunes, cutting on a rune boundary so
+// multibyte text (CJK/Vietnamese) is never split into a U+FFFD replacement char.
+// When it truncates, it appends a marker pointing at wiki_read for the full text.
+func truncateResultContent(content, articlePath string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return content
+	}
+	// Find the byte offset of the (maxRunes)-th rune. range yields rune starts,
+	// so cutting at this index keeps exactly maxRunes whole runes.
+	count := 0
+	cut := -1
+	for i := range content {
+		if count == maxRunes {
+			cut = i
+			break
+		}
+		count++
+	}
+	if cut < 0 {
+		return content // content has <= maxRunes runes; nothing to trim
+	}
+	marker := fmt.Sprintf("\n\n[… truncated to %d chars", maxRunes)
+	if articlePath != "" {
+		marker += fmt.Sprintf("; call wiki_read(%q) for the full text", articlePath)
+	}
+	marker += "]"
+	return content[:cut] + marker
 }
 
 func (s *Server) handleRead(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
