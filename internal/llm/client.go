@@ -82,9 +82,9 @@ func (r *Response) EmptyContentDetails() string {
 	msg := strings.Join(parts, ", ")
 	if r.FinishReason == "length" || r.Reasoning != "" {
 		msg += ". This usually means a reasoning model exhausted its token budget on chain-of-thought. " +
-			"Try raising compiler.summary_max_tokens (or article_max_tokens) — or, " +
-			"for models that support it, add `extra_params: { enable_thinking: false }` " +
-			"or `extra_params: { reasoning_effort: low }` to skip reasoning for this pass."
+			"Try raising compiler.summary_max_tokens (or article_max_tokens), switch the pass to a " +
+			"non-reasoning model, or skip reasoning via extra_params for a model that supports it " +
+			"(provider-specific: `enable_thinking: false`, `reasoning_effort: low`, or Anthropic `thinking: { type: disabled }`)."
 	}
 	return msg
 }
@@ -137,11 +137,16 @@ func NewClient(providerName string, apiKey string, baseURL string, rateLimit int
 		extra = extraParams[0]
 	}
 
-	// Wire extra params into the provider (currently OpenAI-compatible only;
-	// Ollama also uses openaiProvider so it gets extra_params too)
-	if extra != nil {
-		if op, ok := p.(*openaiProvider); ok {
-			op.extraParams = extra
+	// Wire extra params into any provider that accepts them — the raw openai
+	// provider, the nonBatchProvider wrappers (openai-compatible/qwen/ollama,
+	// which forward to their inner provider), and anthropic. Providers that
+	// can't take them (e.g. gemini) are warned about so the setting isn't
+	// silently dropped.
+	if len(extra) > 0 {
+		if s, ok := p.(extraParamsSetter); ok {
+			s.setExtraParams(extra)
+		} else {
+			log.Warn("extra_params set but provider does not support them — ignored", "provider", providerName)
 		}
 	}
 
@@ -278,6 +283,13 @@ type Provider interface {
 	FormatRequest(messages []Message, opts CallOpts) (*http.Request, error)
 	ParseResponse(body []byte) (*Response, error)
 	SupportsVision() bool
+}
+
+// extraParamsSetter is implemented by providers that merge caller-supplied
+// extra_params (e.g. reasoning_effort, enable_thinking, a `thinking` config)
+// into the request body. nonBatchProvider forwards to its inner provider.
+type extraParamsSetter interface {
+	setExtraParams(map[string]interface{})
 }
 
 func newProvider(name string, apiKey string, baseURL string) (Provider, error) {

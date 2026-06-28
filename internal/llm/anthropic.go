@@ -8,8 +8,46 @@ import (
 
 // anthropicProvider implements the Anthropic Messages API format.
 type anthropicProvider struct {
-	apiKey  string
-	baseURL string
+	apiKey      string
+	baseURL     string
+	extraParams map[string]interface{} // provider-specific params merged into request body
+}
+
+// setExtraParams satisfies extraParamsSetter so caller-supplied extra_params
+// (e.g. a `thinking` config to disable reasoning) reach the request body.
+func (p *anthropicProvider) setExtraParams(m map[string]interface{}) { p.extraParams = m }
+
+// mergeExtraParams copies provider-specific extra params into the request body,
+// skipping structural keys that must not be overridden.
+func mergeExtraParams(body map[string]any, extra map[string]interface{}, protected map[string]bool) {
+	for k, v := range extra {
+		if protected[k] {
+			continue
+		}
+		body[k] = v
+	}
+}
+
+// anthropicProtectedKeys are the structural body keys extra_params must not
+// clobber (model/messages/stream/system shape the request itself).
+var anthropicProtectedKeys = map[string]bool{"model": true, "messages": true, "stream": true, "system": true}
+
+// normalizeAnthropicStop maps Anthropic stop_reason values to the OpenAI-style
+// finish_reason vocabulary used across providers, so EmptyContentDetails gives
+// consistent diagnostics + hints. Unknown values pass through unchanged.
+func normalizeAnthropicStop(stop string) string {
+	switch stop {
+	case "max_tokens":
+		return "length"
+	case "end_turn", "stop_sequence":
+		return "stop"
+	case "refusal":
+		return "content_filter"
+	case "tool_use":
+		return "tool_calls"
+	default:
+		return stop
+	}
 }
 
 func newAnthropicProvider(apiKey string, baseURL string) *anthropicProvider {
@@ -70,6 +108,8 @@ func (p *anthropicProvider) formatBody(messages []Message, opts CallOpts, stream
 	if opts.Temperature > 0 {
 		body["temperature"] = opts.Temperature
 	}
+
+	mergeExtraParams(body, p.extraParams, anthropicProtectedKeys)
 
 	return body, systemPrompt
 }
@@ -153,6 +193,8 @@ func (p *anthropicProvider) FormatCachedRequest(cacheID string, messages []Messa
 		body["temperature"] = opts.Temperature
 	}
 
+	mergeExtraParams(body, p.extraParams, anthropicProtectedKeys)
+
 	return p.makeRequest(body)
 }
 
@@ -184,11 +226,13 @@ func (p *anthropicProvider) ParseStreamChunk(data []byte) (string, bool) {
 func (p *anthropicProvider) ParseResponse(body []byte) (*Response, error) {
 	var result struct {
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			Thinking string `json:"thinking"`
 		} `json:"content"`
-		Model string `json:"model"`
-		Usage struct {
+		StopReason string `json:"stop_reason"`
+		Model      string `json:"model"`
+		Usage      struct {
 			InputTokens              int `json:"input_tokens"`
 			OutputTokens             int `json:"output_tokens"`
 			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
@@ -200,21 +244,28 @@ func (p *anthropicProvider) ParseResponse(body []byte) (*Response, error) {
 		return nil, fmt.Errorf("anthropic: parse: %w", err)
 	}
 
-	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("anthropic: empty content in response")
-	}
-
-	var text string
+	// Extract answer text and (separately) reasoning. A reasoning model that
+	// exhausts max_tokens on chain-of-thought returns a `thinking` block with no
+	// `text` block; surfacing FinishReason + Reasoning lets EmptyContentDetails
+	// explain the empty result instead of failing opaquely. An empty content
+	// array is handled the same way (empty Content + FinishReason) rather than a
+	// bare error, so callers route it through the actionable empty-content path.
+	var text, reasoning string
 	for _, block := range result.Content {
-		if block.Type == "text" {
+		switch block.Type {
+		case "text":
 			text += block.Text
+		case "thinking":
+			reasoning += block.Thinking
 		}
 	}
 
 	return &Response{
-		Content:    text,
-		Model:      result.Model,
-		TokensUsed: result.Usage.InputTokens + result.Usage.OutputTokens,
+		Content:      text,
+		Model:        result.Model,
+		TokensUsed:   result.Usage.InputTokens + result.Usage.OutputTokens,
+		FinishReason: normalizeAnthropicStop(result.StopReason),
+		Reasoning:    reasoning,
 		Usage: Usage{
 			InputTokens:  result.Usage.InputTokens,
 			OutputTokens: result.Usage.OutputTokens,

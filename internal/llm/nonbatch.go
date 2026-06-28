@@ -20,6 +20,11 @@ type nonBatchProvider struct {
 func (p *nonBatchProvider) Name() string         { return p.inner.Name() }
 func (p *nonBatchProvider) SupportsVision() bool { return p.inner.SupportsVision() }
 
+// setExtraParams forwards extra_params to the wrapped openaiProvider so
+// openai-compatible/qwen/ollama backends receive them (the wrapper, not the
+// inner provider, is what callers hold).
+func (p *nonBatchProvider) setExtraParams(m map[string]interface{}) { p.inner.setExtraParams(m) }
+
 func (p *nonBatchProvider) FormatRequest(messages []Message, opts CallOpts) (*http.Request, error) {
 	return p.inner.FormatRequest(messages, opts)
 }

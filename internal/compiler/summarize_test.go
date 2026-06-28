@@ -107,7 +107,7 @@ func TestGroupChunksNoGroupingNeeded(t *testing.T) {
 		chunks[i] = extract.Chunk{Index: i, Text: "content"}
 	}
 
-	// 5000 / 5 = 1000 per chunk, above minChunkTokenBudget (500)
+	// 5000 / 5 = 1000 per chunk, >= minChunkTokenBudget (1000) → no grouping
 	groups := groupChunks(chunks, 5000)
 	if len(groups) != 5 {
 		t.Errorf("expected 5 groups (no grouping), got %d", len(groups))
@@ -125,9 +125,9 @@ func TestGroupChunksNeedsGrouping(t *testing.T) {
 		chunks[i] = extract.Chunk{Index: i, Text: "content"}
 	}
 
-	// 2000 / 60 = 33 per chunk, below minChunkTokenBudget (500)
-	// maxGroups = 2000 / 500 = 4
-	// chunksPerGroup = ceil(60 / 4) = 15
+	// 2000 / 60 = 33 per chunk, below minChunkTokenBudget (1000)
+	// maxGroups = 2000 / 1000 = 2
+	// chunksPerGroup = ceil(60 / 2) = 30
 	groups := groupChunks(chunks, 2000)
 	if len(groups) > 4 {
 		t.Errorf("expected <= 4 groups, got %d", len(groups))
@@ -152,8 +152,8 @@ func TestGroupChunksExtreme(t *testing.T) {
 		chunks[i] = extract.Chunk{Index: i, Text: "content"}
 	}
 
-	// 2000 / 200 = 10 per chunk, way below minChunkTokenBudget (500)
-	// maxGroups = 2000 / 500 = 4, chunksPerGroup = 50
+	// 2000 / 200 = 10 per chunk, way below minChunkTokenBudget (1000)
+	// maxGroups = 2000 / 1000 = 2, chunksPerGroup = 100
 	groups := groupChunks(chunks, 2000)
 	if len(groups) > 4 {
 		t.Errorf("expected <= 4 groups, got %d", len(groups))
@@ -189,8 +189,8 @@ func TestGroupChunksMaxTokensBelowMinBudget(t *testing.T) {
 		chunks[i] = extract.Chunk{Index: i, Text: "content"}
 	}
 
-	// maxTokens=100 < minChunkTokenBudget=500
-	// maxGroups = 100/500 = 0, clamped to 1 → all chunks in one group
+	// maxTokens=100 < minChunkTokenBudget=1000
+	// maxGroups = 100/1000 = 0, clamped to 1 → all chunks in one group
 	groups := groupChunks(chunks, 100)
 	if len(groups) != 1 {
 		t.Errorf("expected 1 group when maxTokens < minBudget, got %d", len(groups))
@@ -207,7 +207,7 @@ func TestGroupChunksMaxTokensZero(t *testing.T) {
 	}
 
 	// maxTokens=0 → perChunkBudget=0, triggers grouping
-	// maxGroups = 0/500 = 0, clamped to 1
+	// maxGroups = 0/1000 = 0, clamped to 1
 	groups := groupChunks(chunks, 0)
 	if len(groups) != 1 {
 		t.Errorf("expected 1 group when maxTokens=0, got %d", len(groups))

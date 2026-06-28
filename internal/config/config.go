@@ -487,7 +487,7 @@ func Defaults() Config {
 		Compiler: CompilerConfig{
 			MaxParallel:      20,
 			DebounceSeconds:  2,
-			SummaryMaxTokens: 2000,
+			SummaryMaxTokens: 4000,
 			ArticleMaxTokens: 4000,
 			ExtractMaxTokens: 8192,
 			ExtractBatchSize: 20,

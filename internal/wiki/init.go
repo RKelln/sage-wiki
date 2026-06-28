@@ -234,7 +234,7 @@ embed:
 compiler:
   max_parallel: 4
   debounce_seconds: 2
-  summary_max_tokens: 2000
+  summary_max_tokens: 4000
   article_max_tokens: 4000
   auto_commit: true
   auto_lint: true
