@@ -200,6 +200,8 @@ func runFullPipeline(sources []SourceInfo, opts FullPipelineOpts) *FullPipelineR
 	if err != nil {
 		progress.ItemError("concept extraction", err)
 		result.Errors++
+		progress.EndPhase()
+		client.TeardownCache(extCacheID)
 		return result
 	}
 

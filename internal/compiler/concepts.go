@@ -85,6 +85,21 @@ func ExtractConcepts(
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
+	// Track batch failures so a total failure surfaces as an error instead of a
+	// silent empty result (the caller only increments result.Errors when this
+	// returns non-nil). firstErr carries the actionable diagnostic.
+	var failMu sync.Mutex
+	failures := 0
+	var firstErr error
+	recordFailure := func(e error) {
+		failMu.Lock()
+		failures++
+		if firstErr == nil {
+			firstErr = e
+		}
+		failMu.Unlock()
+	}
+
 	for _, b := range batches {
 		wg.Add(1)
 		go func(b batchWork) {
@@ -108,6 +123,7 @@ func ExtractConcepts(
 				Summaries:        strings.Join(summaryTexts, "\n\n---\n\n"),
 			}, "")
 			if err != nil {
+				recordFailure(fmt.Errorf("batch %d render: %w", b.index+1, err))
 				log.Error("render extract_concepts prompt failed", "batch", b.index+1, "error", err)
 				return
 			}
@@ -117,12 +133,23 @@ func ExtractConcepts(
 				{Role: "user", Content: prompt},
 			}, llm.CallOpts{Model: model, MaxTokens: maxTokens})
 			if err != nil {
+				recordFailure(fmt.Errorf("batch %d: %w", b.index+1, err))
 				log.Error("concept extraction batch failed", "batch", b.index+1, "error", err)
+				return
+			}
+
+			// Empty/reasoning-truncated content: surface the actionable hint
+			// (finish_reason/reasoning/raise-budget) rather than letting
+			// parseConceptsJSON misreport it as "unexpected end of JSON input".
+			if gErr := emptyContentError(resp, "concept extraction", fmt.Sprintf("batch %d", b.index+1)); gErr != nil {
+				recordFailure(gErr)
+				log.Error("concept extraction returned empty content", "batch", b.index+1, "error", gErr)
 				return
 			}
 
 			concepts, err := parseConceptsJSON(resp.Content)
 			if err != nil {
+				recordFailure(fmt.Errorf("batch %d parse: %w", b.index+1, err))
 				log.Error("concept extraction parse failed", "batch", b.index+1, "error", err)
 				return
 			}
@@ -145,6 +172,17 @@ func ExtractConcepts(
 
 	// Deduplicate across batches
 	allConcepts = deduplicateConcepts(allConcepts)
+
+	// A total failure (every batch errored) must not look like a clean empty
+	// extraction — return an error so the caller increments result.Errors instead
+	// of silently skipping article writing. Partial failures proceed with what
+	// did extract.
+	if failures > 0 {
+		if failures == totalBatches {
+			return nil, fmt.Errorf("concept extraction failed: all %d batch(es) errored: %w", totalBatches, firstErr)
+		}
+		log.Warn("some concept-extraction batches failed", "failed", failures, "of", totalBatches)
+	}
 
 	log.Info("concepts extracted", "total", len(allConcepts))
 	return allConcepts, nil

@@ -868,6 +868,8 @@ func resumeBatch(
 		if err != nil {
 			progress.ItemError("concept extraction", err)
 			result.Errors++
+			progress.EndPhase()
+			client.TeardownCache(extCacheID)
 		} else {
 			result.ConceptsExtracted = len(concepts)
 			var conceptNames []string
