@@ -329,13 +329,21 @@ func (p *geminiProvider) ParseResponse(body []byte) (*Response, error) {
 		return nil, fmt.Errorf("gemini: no candidates in response. Raw: %s", raw)
 	}
 
-	// Handle MAX_TOKENS with empty content (thinking models use tokens internally)
+	// Handle MAX_TOKENS with empty content (thinking models use tokens internally).
+	// Surface FinishReason + output tokens so EmptyContentDetails can explain the
+	// truncation and emit the actionable hint instead of a bare "empty content".
 	if len(result.Candidates[0].Content.Parts) == 0 {
 		if result.Candidates[0].FinishReason == "MAX_TOKENS" {
 			return &Response{
-				Content:    "",
-				Model:      result.ModelVersion,
-				TokensUsed: result.UsageMetadata.TotalTokenCount,
+				Content:      "",
+				Model:        result.ModelVersion,
+				TokensUsed:   result.UsageMetadata.TotalTokenCount,
+				FinishReason: normalizeGeminiFinish(result.Candidates[0].FinishReason),
+				Usage: Usage{
+					InputTokens:  result.UsageMetadata.PromptTokenCount,
+					OutputTokens: result.UsageMetadata.CandidatesTokenCount,
+					CachedTokens: result.UsageMetadata.CachedContentTokenCount,
+				},
 			}, nil
 		}
 		raw := string(body)
@@ -351,15 +359,32 @@ func (p *geminiProvider) ParseResponse(body []byte) (*Response, error) {
 	}
 
 	return &Response{
-		Content:    text,
-		Model:      result.ModelVersion,
-		TokensUsed: result.UsageMetadata.TotalTokenCount,
+		Content:      text,
+		Model:        result.ModelVersion,
+		TokensUsed:   result.UsageMetadata.TotalTokenCount,
+		FinishReason: normalizeGeminiFinish(result.Candidates[0].FinishReason),
 		Usage: Usage{
 			InputTokens:  result.UsageMetadata.PromptTokenCount,
 			OutputTokens: result.UsageMetadata.CandidatesTokenCount,
 			CachedTokens: result.UsageMetadata.CachedContentTokenCount,
 		},
 	}, nil
+}
+
+// normalizeGeminiFinish maps Gemini finishReason values to the OpenAI-style
+// finish_reason vocabulary used across providers (so EmptyContentDetails gives
+// consistent diagnostics + hints). Unknown values pass through unchanged.
+func normalizeGeminiFinish(reason string) string {
+	switch reason {
+	case "MAX_TOKENS":
+		return "length"
+	case "STOP":
+		return "stop"
+	case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT":
+		return "content_filter"
+	default:
+		return reason
+	}
 }
 
 // --- BatchProvider implementation ---

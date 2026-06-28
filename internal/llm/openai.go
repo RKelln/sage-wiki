@@ -24,6 +24,9 @@ func newOpenAIProvider(apiKey string, baseURL string) *openaiProvider {
 func (p *openaiProvider) Name() string        { return "openai" }
 func (p *openaiProvider) SupportsVision() bool { return true }
 
+// setExtraParams satisfies extraParamsSetter.
+func (p *openaiProvider) setExtraParams(m map[string]interface{}) { p.extraParams = m }
+
 func (p *openaiProvider) formatBody(messages []Message, opts CallOpts, stream bool) map[string]any {
 	var apiMessages []any
 	for _, m := range messages {
@@ -123,10 +126,12 @@ func (p *openaiProvider) ParseResponse(body []byte) (*Response, error) {
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
-				// Reasoning is returned by reasoning models (DeepSeek, Qwen, etc.)
-				// via OpenAI-compatible APIs. Surfaced for diagnostics — never
-				// used as fallback content.
-				Reasoning string `json:"reasoning"`
+				// Reasoning is returned by reasoning models via OpenAI-compatible
+				// APIs. Field name varies: OpenRouter/some gateways use "reasoning";
+				// DeepSeek's native OpenAI-compatible API uses "reasoning_content".
+				// Surfaced for diagnostics — never used as fallback content.
+				Reasoning        string `json:"reasoning"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
@@ -149,12 +154,17 @@ func (p *openaiProvider) ParseResponse(body []byte) (*Response, error) {
 		return nil, fmt.Errorf("openai: empty choices in response")
 	}
 
+	reasoning := result.Choices[0].Message.Reasoning
+	if reasoning == "" {
+		reasoning = result.Choices[0].Message.ReasoningContent
+	}
+
 	return &Response{
 		Content:      result.Choices[0].Message.Content,
 		Model:        result.Model,
 		TokensUsed:   result.Usage.TotalTokens,
 		FinishReason: result.Choices[0].FinishReason,
-		Reasoning:    result.Choices[0].Message.Reasoning,
+		Reasoning:    reasoning,
 		Usage: Usage{
 			InputTokens:  result.Usage.PromptTokens,
 			OutputTokens: result.Usage.CompletionTokens,

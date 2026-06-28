@@ -43,6 +43,32 @@ func TestOpenAIParseResponse_ReasoningAndFinishReason(t *testing.T) {
 	}
 }
 
+// TestOpenAIParseResponse_ReasoningContentField verifies the parser also reads
+// DeepSeek's native OpenAI-compatible reasoning field name `reasoning_content`
+// (not just `reasoning`), so reasoning-truncation diagnostics work for
+// DeepSeek-via-OpenAI too.
+func TestOpenAIParseResponse_ReasoningContentField(t *testing.T) {
+	body := []byte(`{
+		"choices": [{
+			"message": {"content": "", "reasoning_content": "deepseek thinking here"},
+			"finish_reason": "length"
+		}],
+		"model": "deepseek-chat",
+		"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+	}`)
+	p := newOpenAIProvider("k", "https://x/v1")
+	resp, err := p.ParseResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp.Reasoning, "deepseek thinking") {
+		t.Errorf("Reasoning should read reasoning_content; got %q", resp.Reasoning)
+	}
+	if resp.FinishReason != "length" {
+		t.Errorf("FinishReason = %q, want length", resp.FinishReason)
+	}
+}
+
 func TestOpenAIParseResponse_NormalResponse(t *testing.T) {
 	body := []byte(`{
 		"choices": [{
